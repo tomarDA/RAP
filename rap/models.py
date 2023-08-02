@@ -20,21 +20,44 @@ class QueryHfModel(QueryLM):
     def query_next_token(self, prompt: list[str]):
         raise NotImplementedError
 
-    def __init__(self, model, tokenizer, max_response_length, device):
+    def __init__(self, model, max_response_length, temperature=0.001):
         self.model = model
-        self.tokenizer = tokenizer
-        self.device = device
         self.n_examples = 1
-        self.max_response_length = max_response_length
+        self.tempersture=temperature
+        self.max_response_length=max_response_length
+        self.tokenizer=self.model.tokenize
+
+    def concat_tensors(self,tensor_list):
+        # Find the maximum dimension among all tensors
+        max_dim = max([t.shape[1] for t in tensor_list])
+
+        # Pad each tensor to the maximum dimension
+        padded_tensors = []
+        for tensor in tensor_list:
+            pad_size = max_dim - tensor.shape[1]
+            padded_tensor = torch.nn.functional.pad(tensor, (0, pad_size))
+            padded_tensors.append(padded_tensor)
+        
+        return padded_tensors
 
     def query_LM(self, prompt, **gen_kwargs):
         with torch.no_grad():
-            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-            # print("input length", len(inputs))
-            # Generate
-            generate_ids = self.model.generate(inputs.input_ids, max_new_tokens=self.max_response_length, **gen_kwargs)
-            text = self.tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-        return text
+            text = self.model(prompt, max_tokens=self.max_response_length)
+        return text['choices'][0]['text']
+    
+    @torch.no_grad()
+    def query_next_token(self, prompts):
+        if isinstance(prompts, str):
+            prompts = [prompts]
+        ret = []
+        for prompt in prompts:
+            resp=self.model(prompt, max_tokens=self.max_response_length, logprobs=1)
+            logits=resp['choices'][0]['token_logprobs']
+            ret.append(torch.tensor(logits, dtype=torch.float16))
+        outputs = torch.cat(self.concat_tensors(ret), dim=0)
+        filtered = outputs
+        dist = torch.softmax(filtered, dim=-1)
+        return dist
 
 
 class QueryLlama(QueryLM):

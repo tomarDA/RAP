@@ -2,7 +2,7 @@ import pickle
 import re
 from datetime import datetime
 
-from rap.models import QueryLlama
+from rap.models import QueryLlama, QueryHfModel
 from rap.utils.gsm8k import judge_answer_gsm8k, get_gsm8k_dataset
 from rap.gsm8k_mcts import reasoning_mcts_search
 
@@ -21,9 +21,7 @@ from pathlib import Path
 
 from fairscale.nn.model_parallel.initialize import initialize_model_parallel
 from tqdm import tqdm
-from llama import ModelArgs, Transformer, Tokenizer, LLaMA
-from llama_opensource import model, tokenizer
-
+from llama_cpp import Llama
 
 def setup_model_parallel() -> Tuple[int, int]:
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -36,34 +34,10 @@ def setup_model_parallel() -> Tuple[int, int]:
     return local_rank, world_size
 
 
-def load(ckpt_dir: str, tokenizer_path: str, local_rank: int, world_size: int, max_batch_size: int) -> LLaMA:
-    start_time = time.time()
-    checkpoints = sorted(Path(ckpt_dir).glob("*.pth"))
-    # print(checkpoints)
-    assert (
-            world_size == len(checkpoints)
-    ), f"Loading a checkpoint for MP={len(checkpoints)} but world size is {world_size}"
-    ckpt_path = checkpoints[local_rank]
-    print("Loading")
-    checkpoint = torch.load(ckpt_path, map_location="cpu")
-    with open(Path(ckpt_dir) / "params.json", "r") as f:
-        params = json.loads(f.read())
-
-    model_args: ModelArgs = ModelArgs(max_seq_len=2048, max_batch_size=max_batch_size, **params)
-    tokenizer = Tokenizer(model_path=tokenizer_path)
-    model_args.vocab_size = tokenizer.n_words
-    torch.set_default_tensor_type(torch.cuda.HalfTensor)
-    model = Transformer(model_args).cuda().half()
-    torch.set_default_tensor_type(torch.FloatTensor)
-    model.load_state_dict(checkpoint, strict=False)
-    generator = LLaMA(model, tokenizer)
-    print(f"Loaded in {time.time() - start_time:.2f} seconds")
-    return generator
-
-
 def main_mcts(llama_ckpt='llama-ckpts/30B',
               prompts='data/gsm8k/prompts/interactive_examples.json',
               question_prompts='data/gsm8k/prompts/useful_examples.json',
+              quantized_model_weights_path='../../llama2/llama.cpp/models/7B/ggml-model-q4_0.bin',
               max_batch_size=2,
               max_response_length=200,
               mcts_rollouts=10,
@@ -78,7 +52,7 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
               log_dir=None,
               speedup_confidence_batch_size=None):
     if log_dir is None:
-        log_dir = f'logs/gsm8k_mcts_{llama_ckpt.split("/")[-1]}/{datetime.now().strftime("%Y-%m%d-%H%M")}'
+        log_dir = f'logs/{datetime.now().strftime("%Y-%m%d-%H%M")}'
     os.makedirs(log_dir, exist_ok=True)
 
     # set random seed
@@ -87,9 +61,11 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchm = False
 
-    local_rank, world_size = setup_model_parallel()
+    # local_rank, world_size = setup_model_parallel()
+    local_rank=0
+    print(local_rank, "local rank",end="\n\n\n\n")
 
     if local_rank > 0:
         sys.stdout = open(os.devnull, 'w')
@@ -97,10 +73,8 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
     else:
         log_file = None
 
-    llama = LLaMA(model, tokenizer)
-    
-
-    world_model = QueryLlama(llama, max_response_length=max_response_length, log_file=log_file)
+    model = Llama(quantized_model_weights_path, logits_all=True,n_ctx=1500)
+    world_model = QueryHfModel(model, max_response_length=max_response_length, temperature=0)
 
     examples = get_gsm8k_dataset('test')
     with open(prompts) as f:
@@ -109,7 +83,7 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
         question_prompts = json.load(f)
 
     total_correct = [0] * mcts_rollouts
-    for i, example in enumerate((pbar := tqdm(examples, disable=local_rank > 0, position=1))):
+    for i, example in enumerate((tqdm(examples, disable=local_rank > 0, position=1))):
         if i < resume:
             continue
         question = example['question']
@@ -125,7 +99,7 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
                                                    w_exp=w_exp,
                                                    r_alpha=r_alpha,
                                                    r1_default=r1_default,
-                                                   eos_token_id=world_model.tokenizer.encode('\n', bos=False, eos=False)[-1],
+                                                   eos_token_id=world_model.tokenizer(b'\n')[-1],
                                                    speedup_confidence_batch_size=speedup_confidence_batch_size)
         if local_rank == 0:
             json_logs = []
