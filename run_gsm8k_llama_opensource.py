@@ -5,7 +5,6 @@ from datetime import datetime
 from rap.models import QueryLlama, QueryHfModel
 from rap.utils.gsm8k import judge_answer_gsm8k, get_gsm8k_dataset
 from rap.gsm8k_mcts import reasoning_mcts_search
-
 from typing import Tuple
 import os
 import sys
@@ -121,7 +120,7 @@ def main_mcts(llama_ckpt='llama-ckpts/30B',
             with open(os.path.join(log_dir, f'{i:04d}.pkl'), 'wb') as f:
                 pickle.dump(trees, f)
             tqdm.write(' '.join(f'{c/(i+1-resume):0.3f}' for c in total_correct))
-            pbar.set_description(f'{total_correct[-1]}/{i+1-resume}={total_correct[-1]/(i+1-resume):.2f}')
+            print(f'{total_correct[-1]}/{i+1-resume}={total_correct[-1]/(i+1-resume):.2f}')
 
 
 if __name__ == '__main__':
