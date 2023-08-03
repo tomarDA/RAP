@@ -29,6 +29,7 @@ class QueryHfModel(QueryLM):
 
     def concat_tensors(self,tensor_list):
         # Find the maximum dimension among all tensors
+        tensor_list=[x.reshape((1,-1)) for x in tensor_list]
         max_dim = max([t.shape[1] for t in tensor_list])
 
         # Pad each tensor to the maximum dimension
@@ -52,11 +53,11 @@ class QueryHfModel(QueryLM):
         ret = []
         for prompt in prompts:
             resp=self.model(prompt, max_tokens=self.max_response_length, logprobs=1)
-            logits=resp['choices'][0]['token_logprobs']
+            logits=resp['choices'][0]['logprobs']['token_logprobs']
             ret.append(torch.tensor(logits, dtype=torch.float16))
         outputs = torch.cat(self.concat_tensors(ret), dim=0)
         filtered = outputs
-        dist = torch.softmax(filtered, dim=-1)
+        dist = torch.softmax(filtered.float(), dim=-1)
         return dist
 
 
