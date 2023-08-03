@@ -26,7 +26,7 @@ Source code for the paper [Reasoning with Language Model is Planning with World 
 
 ## GSM8k_llama_opesource
 - Install dependencies using `pip install -r requirement.txt`
-- Run with: ```CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node 2 --master-port 1054 run_gsm8k_llama_opensource.py --llama-ckpt --speedup-confidence-batch-size 2 --quantized_model_weights_path '../../llama2/llama.cpp/models/7B/ggml-model-q4_0.bin'```
+- Run with: ```CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node 2 --master-port 1054 run_gsm8k_llama_opensource.py --speedup-confidence-batch-size 2 --quantized_model_weights_path '../../llama2/llama.cpp/models/7B/ggml-model-q4_0.bin'```
 
 ## ProntoQA
 - Run with: ```CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node 4 --master-port 1074 run_prontoqa.py --llama-ckpt $LLAMA_CKPTS/30B```
